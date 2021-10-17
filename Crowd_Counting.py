@@ -1,5 +1,3 @@
-
-
 import argparse
 import random
 from data_reader import DataReader
@@ -81,8 +79,6 @@ parser.add_argument('--patches', default=100, type=int, metavar='N',
 #                     help='weight decay (default: 1e-4)')
 # parser.add_argument('--mle', action='store_true',
 #                      help='calculate mle')
-parser.add_argument('--lsccnn', action='store_true',
-                     help='use the vgg_modified network')
 parser.add_argument('--trained-model', default='', type=str, metavar='PATH', help='filename of model to load', nargs='+')
 dataset_paths, model_save_dir, batch_size, crop_size, dataset = None, None, None, None, None
 
@@ -206,8 +202,6 @@ class networkFunctions():
         self.optimizers = optim.SGD(filter(lambda p: p.requires_grad, network.parameters()),
                                          lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
         
-
-
         def train_function(Xs, Ys, hist_boxes, hist_boxes_gt, loss_weights, network):
             Ys = (Ys>0).astype(np.float32)
             network = network.cuda()
@@ -278,8 +272,6 @@ class networkFunctions():
 
             return losses, hist_boxes, hist_boxes_gt
 
-
-
         def test_function(X, Y, loss_weights, network):
             Y = (Y>0).astype(np.float32)
             if torch.cuda.is_available():
@@ -310,40 +302,6 @@ class networkFunctions():
             alpha3 = torch.cuda.FloatTensor(loss_weights[1])  # 1/4 scale
             alpha4 = torch.cuda.FloatTensor(loss_weights[0])  # 1/2 scale
 
-            m_1 = nn.CrossEntropyLoss(size_average=True, weight=alpha1)
-            m_2 = nn.CrossEntropyLoss(size_average=True, weight=alpha2)
-            m_3 = nn.CrossEntropyLoss(size_average=True, weight=alpha3)
-            m_4 = nn.CrossEntropyLoss(size_average=True, weight=alpha4)
-            loss = 0.0
-
-            for (out, yss, m) in zip(output, Yss_argmax, [m_1, m_2, m_3, m_4]):
-                loss += m(out, yss)
-
-            out_softmax = [nn.functional.softmax(o, dim=1) for o in output]
-            out_argmax = [torch.argmax(o, dim=1) for o in out_softmax]
-            upsample_max = int(np.log2(16 // output_downscale))
-            upsample_gt = []
-            upsample_pred = []
-            for idx, (yss_out, out) in enumerate(zip(Yss_out, output)):
-                out = nn.functional.softmax(out, dim=1)
-                upsample_yss_out = yss_out
-                upsample_out = out
-                for n in range(upsample_max-idx):
-                    upsample_yss_out = self.upsample_single(upsample_yss_out, factor=2)
-                    upsample_out = self.upsample_single(upsample_out, factor=2)
-
-                upsample_gt.append(upsample_yss_out.cpu().data.numpy())
-                upsample_pred.append(upsample_out.cpu().data.numpy())
-
-            return loss.data, upsample_pred, upsample_gt
-                    
-
-        self.train_funcs.append(train_function)
-        self.test_funcs = test_function
-
-        return self.train_funcs, self.test_funcs
-
-
 def load_model_VGG16(net, dont_load=[]):
     if 'scale_4' in net.name:
         cfg = OrderedDict()
@@ -369,8 +327,8 @@ def load_model_VGG16(net, dont_load=[]):
         cfg['conv_scale1_1'] = 'conv2_1'
         cfg['conv_scale1_2'] = 'conv2_2'
 
-        print ('loading model ', net.name)
-        base_dir = "../imagenet_vgg_weights/"
+        print ('model loading ', net.name)
+        base_dir = "../vgg_weights/"
         layer_copy_count = 0
         for layer in cfg.keys():
             if layer in dont_load:
@@ -768,14 +726,6 @@ def train_networks(network, dataset, network_functions, log_path):
     f.close()
     return
 
-
-"""
-    This method dumps dataset (if not created yet) and calls
-    `train_networks` which consists of training, validation
-    and testing steps.
-    Basically, this is a wrapper around the main training stage.
-"""
-
 # def train():
 #     global dataset_paths, model_save_dir, batch_size, crop_size, dataset, args
 #     print(dataset_paths, dataset)
@@ -838,31 +788,18 @@ if __name__ == '__main__':
 
     # -- Dataset paths
     if args.dataset == "parta":    
-        dataset_paths = {'test': ['../dataset/ST_partA/test_data/images',
-                               '../dataset/ST_partA/test_data/ground_truth'],
-                         'train': ['../dataset/ST_partA/train_data/images',
-                                '../dataset/ST_partA/train_data/ground_truth']}
+        dataset_paths = {'test': ['../dataset/Hajj-Crowd/test_data/images']    
+                         'train': ['../dataset/Hajj-Crowd/train_data/images']}
         validation_set = 30
 
-        path = '../dataset/stparta_dotmaps_predscale0.5_rgb_ddcnn++_test_val_30'
+        path = '../dataset/hajj-crowd_predscale0.5_rgb_ddcnn++_test_val_30'
         output_downscale = 2
     elif args.dataset == "partb":
-        dataset_paths = {'test': ['../dataset/ST_partB/test_data/images',
-                               '../dataset/ST_partB/test_data/ground_truth'],
-                         'train': ['../dataset/ST_partB/train_data/images',
-                                '../dataset/ST_partB/train_data/ground_truth']}
+        dataset_paths = {'test': ['../dataset/ucfcc50/test_data/images']
+                         'train': ['../dataset/ucfcc50/train_data/images']}
         validation_set = 80
         output_downscale = 2
-
-        path = "../dataset/stpartb_dotmaps_predscale0.5_rgb_ddcnn++_test/"
-    elif args.dataset == "ucfqnrf":
-        dataset_paths = {'test': ['../dataset/UCF-QNRF_ECCV18/Test/images',
-                              '../dataset/UCF-QNRF_ECCV18/Test/ground_truth'],
-                         'train': ['../dataset/UCF-QNRF_ECCV18/Train/images',
-                               '../dataset/UCF-QNRF_ECCV18/Train/ground_truth']}
-        validation_set = 240
-        output_downscale = 2
-        path = '../dataset/qnrf_dotmaps_predictionScale_'+str(output_downscale)
+        path = '../dataset/ucc50_dotmaps_predictionScale_'+str(output_downscale)
 
     
     model_save_dir = './models'
