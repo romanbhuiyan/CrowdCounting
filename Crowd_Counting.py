@@ -9,17 +9,7 @@ import os
 import random, string
 import math
 import pickle
-from collections import OrderedDict
-import torch
-from torch import nn as nn, optim as optim
-from torch.autograd import Variable
-import datetime
-from error_function import offset_sum
-from scipy.misc import imsave, imresize
-from utils import apply_nms
-from network import LSCCNN
-from utils.logging_tools import *
-from utils.loss_weights import *
+
 
 PRED_DOWNSCALE_FACTORS = (8, 4, 2, 1)
 
@@ -54,7 +44,7 @@ loss_weights = None
 
 
 matplotlib.use('Agg')
-parser = argparse.ArgumentParser(description='PyTorch LSC-CNN Training')
+parser = argparse.ArgumentParser(description='Training')
 parser.add_argument('--epochs', default=200, type=int, metavar='N',
                     help='number of total epochs to run')
 parser.add_argument('--gpu', default=1, type=int,
@@ -65,20 +55,7 @@ parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
                     in the last save-file')
 parser.add_argument('-b', '--batch-size', default=4, type=int, metavar='N',
                     help='mini-batch size (default: 4),only used for train')
-parser.add_argument('--patches', default=100, type=int, metavar='N', 
-                    help='number of patches per image')
-# parser.add_argument('--dataset', default="parta", type=str,
-#                      help='dataset to train on')
-# parser.add_argument('--lr', '--learning-rate', default=1e-3, type=float,
-#                     metavar='LR', help='initial learning rate')
-# parser.add_argument('--momentum', default=0.9, type=float,
-#                      metavar='M', help='momentum')
-# parser.add_argument('--threshold', default=-1.0, type=float,
-#                       metavar='M', help='fixed threshold to do NMS')
-# parser.add_argument('--weight-decay', '--wd', default=1e-4, type=float, metavar='W',
-#                     help='weight decay (default: 1e-4)')
-# parser.add_argument('--mle', action='store_true',
-#                      help='calculate mle')
+
 parser.add_argument('--trained-model', default='', type=str, metavar='PATH', help='filename of model to load', nargs='+')
 dataset_paths, model_save_dir, batch_size, crop_size, dataset = None, None, None, None, None
 
@@ -328,7 +305,7 @@ def load_model_VGG16(net, dont_load=[]):
         cfg['conv_scale1_2'] = 'conv2_2'
 
         print ('model loading ', net.name)
-        base_dir = "../vgg_weights/"
+        base_dir = "../vgg_w/"
         layer_copy_count = 0
         for layer in cfg.keys():
             if layer in dont_load:
@@ -565,24 +542,6 @@ def train_networks(network, dataset, network_functions, log_path):
 
     # -- Get train, test functions
     train_funcs, test_funcs = network_functions.create_network_functions(network)
-
-    start_epoch = args.start_epoch
-    num_epochs = args.epochs
-    valid_losses = {}
-    test_losses = {}
-    train_losses = {}
-    for metric in ['loss1', 'new_mae']:
-        valid_losses[metric] = []
-        test_losses[metric] = []
-
-    for metric in ['loss1']:
-        train_losses[metric] = []
-
-    batch_size = args.batch_size
-    num_train_images = len(dataset.dataset_files['train'])
-    num_patches_per_image = args.patches
-    num_batches_per_epoch = num_patches_per_image * num_train_images // batch_size
-
     if start_epoch > 0:
         with open(os.path.join(snapshot_path, 'losses.pkl'), 'rb') as lossfile:
             train_losses, valid_losses, test_losses = pickle.load(lossfile, encoding='latin1')
@@ -605,8 +564,8 @@ def train_networks(network, dataset, network_functions, log_path):
 
     # -- Main Training Loop
     global loss_weights
-    if os.path.isfile("loss_weights.npy"):
-        loss_weights = np.load('loss_weights.npy')
+    if os.path.isfile("loss_w.npy"):
+        loss_weights = np.load('loss_w.npy')
     else:
         loss_weights = np.ones((4, 4))
     HIST_GT = []
@@ -641,32 +600,12 @@ def train_networks(network, dataset, network_functions, log_path):
             np.save('loss_weights.npy', loss_weights)
             print("Saving loss weights!! PLEASE re-run the code for training/testing")
             exit()
-
-        # -- Stats update
-        avg_loss = [al / num_batches_per_epoch for al in avg_loss]
-        avg_loss = [av for av in avg_loss]
-
-        train_losses['loss1'].append(avg_loss)
-        
-        epoch_test_losses, txt = test_lsccnn(test_funcs, dataset, 'test', network, True)
-        log(f, 'TEST epoch: ' + str(epoch) + ' ' + txt)
-        epoch_val_losses, txt = test_lsccnn(test_funcs, dataset, 'test_valid', network, True)
-        log(f, 'TEST valid epoch: ' + str(epoch) + ' ' + txt)
-
-        for metric in ['loss1', 'new_mae']:
-            valid_losses[metric].append(epoch_val_losses[metric])
-            test_losses[metric].append(epoch_test_losses[metric])
-
         # Save networks
         save_checkpoint({
                 'epoch': epoch + 1,
                 'state_dict': network.state_dict(),
                 'optimizer': network_functions.optimizers.state_dict(),
             }, snapshot_path, get_filename(network.name, epoch + 1))
-
-        print ('saving graphs...')
-        with open(os.path.join(snapshot_path, 'losses.pkl'), 'wb') as lossfile:
-            pickle.dump((train_losses, valid_losses, test_losses), lossfile, protocol=2)
 
         for metric in train_losses.keys():
             if "maxima_split" not in metric:
@@ -706,54 +645,7 @@ def train_networks(network, dataset, network_functions, log_path):
             plt.clf()
             plt.close()
 
-    # -- Finding best NMS Threshold
-    if args.threshold == -1:
-        threshold = find_class_threshold(f, dataset, 1, test_funcs, network)
-        log(f, "Best Threshold is", threshold)
-    else:
-        threshold = args.threshold
-    # Test the latest model and the best model
-    try:
-        min_epoch = np.argmin(map(sum, valid_losses['mae']))
-        min_epoch = np.argmin(valid_losses['new_mae'])
-        log(f, 'Done Training.\n Minimum loss %s at epoch %s' % (valid_losses['new_mae'][min_epoch], min_epoch))
-    except:
-        pass
-    log(f, '\nTesting ...')
-    _, txt = test_lsccnn(test_funcs, dataset, 'test', network, './models/dump_test', thresh=threshold)
-    log(f, 'TEST epoch: ' + str(num_epochs - 1) + ' ' + txt)
-    log(f, 'Exiting train...')
-    f.close()
-    return
-
-# def train():
-#     global dataset_paths, model_save_dir, batch_size, crop_size, dataset, args
-#     print(dataset_paths, dataset)
-#     if not dataset.dataset_ready:
-#         print ('CREATING DATASET...')
-#         if args.dataset == "ucfqnrf":
-#             image_scale_factor = 2
-#         else:
-#             image_scale_factor = 1
-#         dataset.create_dataset_files(dataset_paths,
-#                                      image_crop_size=crop_size,
-#                                      image_roi_size=80,
-#                                      image_roi_stride=72,
-#                                      image_scale_factor=image_scale_factor,
-#                                      prediction_downscale_factor=output_downscale,
-#                                      valid_set_size=validation_set,
-#                                      use_rgb=True,
-#                                      test_batch_size=4)
-#         exit(0)
-#
-#     print ('test,train: ',len(dataset.dataset_files['test']), \
-#         len(dataset.dataset_files['train']))
-#
-#     dataset.test_batch_size = 8
-#     global network
-#     network = LSCCNN(args, nofreeze=True, name='scale_4', output_downscale=4)
-#
-#     load_model_VGG16(network)
+  
 
     model_save_path = os.path.join(model_save_dir, 'train2')
     if not os.path.exists(model_save_path):
