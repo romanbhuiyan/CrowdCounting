@@ -45,7 +45,7 @@ loss_weights = None
 
 matplotlib.use('Agg')
 parser = argparse.ArgumentParser(description='Training')
-parser.add_argument('--epochs', default=200, type=int, metavar='N',
+parser.add_argument('--epochs', default=50, type=int, metavar='N',
                     help='number of total epochs to run')
 parser.add_argument('--gpu', default=1, type=int,
                     help='GPU number')
@@ -418,7 +418,7 @@ def test_lsccnn(test_funcs, dataset, set_name, network, print_output=False, thre
     if isinstance(print_output, str):
         print_path = print_output
     elif isinstance(print_output, bool) and print_output:
-        print_path = './models/dump'
+        print_path = './'
     else:
         print_path = None
 
@@ -517,16 +517,6 @@ def box_NMS(predictions, thresh):
     assert(np.count_nonzero(nms_out) == len(x))
 
     return nms_out, box_out
-
-
-def get_box_and_dot_maps(pred, thresh):
-    assert(len(pred) == 4)
-    all_dot_maps = []
-    all_box_maps = []
-
-    # NMS on the multi-scale outputs
-    nms_out, h = box_NMS(pred, thresh)
-    return nms_out, h
 
 
 def train_networks(network, dataset, network_functions, log_path):
