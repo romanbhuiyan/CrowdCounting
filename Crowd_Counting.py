@@ -1,5 +1,3 @@
-import argparse
-import random
 from data_reader import DataReader
 import matplotlib
 from matplotlib import pyplot as plt
